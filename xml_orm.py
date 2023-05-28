@@ -37,7 +37,7 @@ def drop_data():
 
 
 def save_node(session, node, parent_id):
-    for i, child in enumerate(node):
+    for i, child in enumerate(node, 1):
         new_node = XmlNodes(name=child.tag, parent_node=parent_id, order=i)
         session.add(new_node)
         session.flush()
@@ -54,7 +54,7 @@ def save_xml(xml):
     root = ElementTree.fromstring(xml)
 
     with Session(engine) as session:
-        root_node = XmlNodes(name=root.tag, parent_node=None, order=0)
+        root_node = XmlNodes(name=root.tag, parent_node=None, order=1)
         session.add(root_node)
         session.flush()
         if root.text and root.text.strip() != '':
@@ -109,9 +109,61 @@ def delete_xml(id):
         root.delete()
         session.commit()
 
-def update_node_value(id, pair):
+def iterate_to_get_id_by_line_number(session, id, search_line, curr_line):
+    curr_line[0] += 1
+    if curr_line[0] == search_line:
+        return id
+    for child in session.query(XmlNodes).filter(XmlNodes.parent_node == id).order_by(XmlNodes.order).all():
+        if found_id := iterate_to_get_id_by_line_number(session, child.node_id, search_line, curr_line):
+            return found_id
+
+def get_id_by_line_number(line, root_id):
+    with Session(engine) as session:
+        return iterate_to_get_id_by_line_number(session, root_id, line, [0])    
+
+def update_node_value(root_id, line_num, pair):
     key, value = pair.split("=")
     with Session(engine) as session:
-        attrib = session.query(XmlAttribute).filter(XmlAttribute.node_id == id, XmlAttribute.key == key).first()
+        attrib = session.query(XmlAttribute).filter(XmlAttribute.node_id == get_id_by_line_number(line_num, root_id), XmlAttribute.key == key).first()
         attrib.value = value
         session.commit()
+
+def add_sub_xml(root_id, line_num, xml):
+    node = ElementTree.fromstring(xml)
+    parent_id = get_id_by_line_number(line_num, root_id)
+    with Session(engine) as session:
+        child_count = session.query(XmlNodes).filter(XmlNodes.parent_node == parent_id).count()
+        new_node = XmlNodes(name=node.tag, parent_node=parent_id, order=child_count+1)
+        session.add(new_node)
+        session.flush()
+        if node.text and node.text.strip() != '':
+            new_text = XmlAttribute(node_id=new_node.node_id, key='__text__', value=node.text)
+            session.add(new_text)
+        save_node(session, node, new_node.node_id)
+        try:
+            session.commit()
+        except exc.SQLAlchemyError:
+            session.rollback() # there were changes in database
+
+def change_node_order(root_id, line_num, target_position):
+    target_position = int(target_position)
+    if target_position < 1:
+        raise Exception()
+    node_id = get_id_by_line_number(line_num, root_id)
+    with Session(engine) as session:
+        a = session.query(XmlNodes).filter(XmlNodes.node_id == node_id).first()
+        b = session.query(XmlNodes).filter(XmlNodes.parent_node == a.parent_node, XmlNodes.order == target_position).first()
+        b.order = a.order
+        a.order = target_position
+        session.commit()
+
+def find_node_with_value(root_id, find):
+    nodes = ''
+    with Session(engine) as session:
+        attribiutes = session.query(XmlAttribute).filter(XmlAttribute.value == find).all()
+        nodes = []
+        for attrib in attribiutes:
+            node = session.query(XmlNodes).filter(XmlNodes.node_id == attrib.node_id).first()
+            curr_attrib = session.query(XmlAttribute).filter(XmlAttribute.node_id == node.node_id).all()
+            nodes.append(f'<{node.name}'+ " ".join(["", *[curr.key+'=\"'+curr.value+"\"" for curr in curr_attrib if curr.key != "__text__"]]) + f'>{str(*[curr.value for curr in curr_attrib if curr == "__text__"])}</{node.name}>')
+    return nodes

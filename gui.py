@@ -10,30 +10,29 @@ class MyWindow(QWidget):
     def initUI(self):
         layout = QVBoxLayout()
 
-        # Create the QListWidget
         self.xml_list = QListWidget()
         layout.addWidget(self.xml_list)
 
         self.load_xml_roots()
 
-        # Create the buttons
         button1 = QPushButton("Nowy XML")
         button2 = QPushButton("Wybierz plik")
         button3 = QPushButton("Wczytaj XML")
         button4 = QPushButton("Usuń")
-        button5 = QPushButton("Wczytaj i zmodyfikuj XML")
-        button6 = QPushButton("Zmień kolejność węzłów")
-        button7 = QPushButton("Znajdź wartość")
+        button5 = QPushButton("Zmodyfikuj węzeł")
+        button6 = QPushButton("Dodaj węzeł")
+        button7 = QPushButton("Zmień kolejność węzłów")
+        button8 = QPushButton("Znajdź wartość")
 
         button1.clicked.connect(self.new_xml)
         button2.clicked.connect(self.load_file)
         button3.clicked.connect(self.load_xml)
         button4.clicked.connect(self.delete_xml)
         button5.clicked.connect(self.modify_xml)
-        button6.clicked.connect(self.tmp)
-        button7.clicked.connect(self.tmp)
+        button6.clicked.connect(self.add_node)
+        button7.clicked.connect(self.change_order)
+        button8.clicked.connect(self.find_value)
 
-        # Add the buttons to the layout
         layout.addWidget(button1)
         layout.addWidget(button2)
         layout.addWidget(button3)
@@ -41,6 +40,7 @@ class MyWindow(QWidget):
         layout.addWidget(button5)
         layout.addWidget(button6)
         layout.addWidget(button7)
+        layout.addWidget(button8)
 
         self.setLayout(layout)
         self.setWindowTitle("XML Editor")
@@ -95,16 +95,29 @@ class MyWindow(QWidget):
     def modify_xml(self):
         selected_value = self.xml_list.currentRow()
         if selected_value:
-            dialog = XMLModifyInterface(int(self.xml_list.currentItem().whatsThis()), self)
+            dialog = XMLModifyInterface(int(self.xml_list.currentItem().whatsThis()), xml_orm.update_node_value,
+                'Wpisz klucz=nowa wartość, aby zmienić wartość w zaznczonej lini.\nW celu zmiany tekstu wpisz jako klucz - __text__', 'Zamień', self)
             dialog.exec()
 
-    def button1_save(self):
-        if self.xml_content:
-            xml_orm.save_xml(self.xml_content)
-            self.xml_text_edit.clear()
+    def add_node(self):
+        selected_value = self.xml_list.currentRow()
+        if selected_value:
+            dialog = XMLModifyInterface(int(self.xml_list.currentItem().whatsThis()), xml_orm.add_sub_xml,
+                'Dodaj nowy węzeł lub strukture węzłów', 'Wstaw', self)
+            dialog.exec()
 
-    def tmp(self):
-        print("Button 3 clicked")
+    def change_order(self):
+        selected_value = self.xml_list.currentRow()
+        if selected_value:
+            dialog = XMLModifyInterface(int(self.xml_list.currentItem().whatsThis()), xml_orm.change_node_order,
+                'Wpisz numer pozycji, na której ma się znależć wybrany węzeł.', 'Zamień kolejność', self)
+            dialog.exec()
+
+    def find_value(self):
+        selected_value = self.xml_list.currentRow()
+        if selected_value:
+            dialog = XMLSearchingInterface(int(self.xml_list.currentItem().whatsThis()), self)
+            dialog.exec()
 
 
 class XMLTextEditor(QDialog):
@@ -142,20 +155,22 @@ class XMLEditorInterface(XMLTextEditor):
 
 
 class XMLModifyInterface(XMLTextEditor):
-    def __init__(self, id, parent=None):
+    def __init__(self, id, func, info, text_button, parent=None):
         super().__init__('', parent)
-        self.setGeometry(100, 100, 300, 400)
+        self.setGeometry(100, 100, 400, 500)
         self.root_id = id
+        self.func = func
+        self.xml_text_edit.setFixedHeight(100)
 
         self.xml_list = QListWidget()
         self.load_xml_doc()
         self.layout.insertWidget(0, self.xml_list)
 
-        info = QLabel('Wpisz klucz=nowa wartość, aby zmienić wartość w zaznczonej lini.\nW celu zmiany tekstu wpisz jako klucz - __text__')
+        info = QLabel(info)
         self.layout.insertWidget(1, info)
 
-        self.button1 = QPushButton('Zamień')
-        self.button1.clicked.connect(self.update)
+        self.button1 = QPushButton(text_button)
+        self.button1.clicked.connect(self.on_click)
         self.layout.addWidget(self.button1)
 
     def load_xml_doc(self):
@@ -163,24 +178,46 @@ class XMLModifyInterface(XMLTextEditor):
 
         self.xml_list.clear()
         self.xml_list.addItem("Wybierz węzeł")
-        lines_of_xml = re.sub(r">\n<[^/]", ">><<", text[text.find('\n')+1:]).split('><')
+        lines_of_xml = re.sub(r">\n<(?!/)", ">><<", text[text.find('\n')+1:]).split('><')
         for line in lines_of_xml:
             self.xml_list.addItem(line)
         self.xml_list.setCurrentRow(0)
 
-    def update(self):
+    def on_click(self):
         selected = self.xml_list.currentRow()
         if selected:
             try:
-                xml_orm.update_node_value(selected+self.root_id-1, self.xml_text_edit.toPlainText())
+                self.func(self.root_id, selected, self.xml_text_edit.toPlainText())
                 self.xml_text_edit.clear()
                 self.load_xml_doc()
-                
             except:
                 dlg = QMessageBox(self)
-                dlg.setWindowTitle("Validation")
-                dlg.setText("Pole zamiany wrości jest błędnie wypełnione.\nPoprawny format to klucz=nowa wartość.")
+                dlg.setWindowTitle("Walidacja")
+                dlg.setText("Pole tekstowe jest błędnie uzupełnione.")
                 button = dlg.exec()
+
+class XMLSearchingInterface(XMLTextEditor):
+    def __init__(self, id, parent=None):
+        super().__init__('', parent)
+        self.setGeometry(100, 100, 300, 400)
+        self.root_id = id
+
+        info = QLabel('Wprowadź szukaną wartość.')
+        self.layout.insertWidget(0, info)
+
+        self.found = QLabel('')
+        self.found.hide()
+        self.layout.addWidget(self.found)
+
+        self.button1 = QPushButton('Znajdź')
+        self.button1.clicked.connect(self.find_value)
+        self.layout.addWidget(self.button1)
+    
+    def find_value(self):
+        if nodes := xml_orm.find_node_with_value(self.root_id, self.xml_text_edit.toPlainText()):
+            self.found.setText('\nZnalezionio wartości:\n'+"\n".join(nodes))
+            self.found.show()
+        
 
 
 if __name__ == "__main__":
