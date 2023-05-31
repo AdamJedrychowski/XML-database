@@ -217,8 +217,6 @@ class XMLSearchingInterface(XMLTextEditor):
         if nodes := xml_orm.find_node_with_value(self.root_id, self.xml_text_edit.toPlainText()):
             self.found.setText('\nZnalezionio wartości:\n'+"\n".join(nodes))
             self.found.show()
-        
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
